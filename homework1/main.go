@@ -33,4 +33,11 @@ func testFunction(x int) int {
 		log.Fatalf("Ошибка построения SSA: %v", err)
 	}
 	fmt.Printf("CFG построен для функции с %d блоками\n", len(graph.Blocks))
+
+	for _, block := range graph.Blocks {
+		fmt.Printf("\nБлок %d (%s), предшественники: %v, преемники: %v\n", block.Index, block.Comment, block.Preds, block.Succs)
+		for _, instr := range block.Instrs {
+			fmt.Printf("\t%T\t%s\n", instr, instr)
+		}
+	}
 }
