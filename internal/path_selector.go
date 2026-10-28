@@ -29,3 +29,15 @@ type RandomPathSelector struct{}
 func (random *RandomPathSelector) CalculatePriority(interpreter Interpreter) int {
 	return rand.Int()
 }
+
+// CoverageGuidedPathSelector отдаёт предпочтение состояниям в реже посещённых базовых блоках,
+// при равенстве - более ранним состояниям.
+type CoverageGuidedPathSelector struct {
+	counter int
+}
+
+func (coverage *CoverageGuidedPathSelector) CalculatePriority(interpreter Interpreter) int {
+	coverage.counter++
+	visits := interpreter.Analyser.BlockVisits[interpreter.frame().Block]
+	return -visits<<32 - coverage.counter
+}
