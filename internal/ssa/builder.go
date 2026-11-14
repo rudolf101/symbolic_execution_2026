@@ -30,7 +30,23 @@ func (b *Builder) BuildPackage(source string) (*ssa.Package, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	return b.build([]*ast.File{file})
+}
 
+// BuildPackageFromFiles строит SSA представление пакета, состоящего из файлов paths
+func (b *Builder) BuildPackageFromFiles(paths []string) (*ssa.Package, error) {
+	files := make([]*ast.File, len(paths))
+	for i, path := range paths {
+		file, err := parser.ParseFile(b.fset, path, nil, parser.ParseComments)
+		if err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		files[i] = file
+	}
+	return b.build(files)
+}
+
+func (b *Builder) build(files []*ast.File) (*ssa.Package, error) {
 	info := &types.Info{
 		Types:        make(map[ast.Expr]types.TypeAndValue),
 		Defs:         make(map[*ast.Ident]types.Object),
@@ -41,14 +57,15 @@ func (b *Builder) BuildPackage(source string) (*ssa.Package, error) {
 		Selections:   make(map[*ast.SelectorExpr]*types.Selection),
 		FileVersions: make(map[*ast.File]string),
 	}
-	pkg := types.NewPackage(file.Name.Name, file.Name.Name)
+	name := files[0].Name.Name
+	pkg := types.NewPackage(name, name)
 	config := &types.Config{Importer: importer.Default()}
-	if err := types.NewChecker(config, b.fset, pkg, info).Files([]*ast.File{file}); err != nil {
+	if err := types.NewChecker(config, b.fset, pkg, info).Files(files); err != nil {
 		return nil, fmt.Errorf("type check: %w", err)
 	}
 
 	program := ssa.NewProgram(b.fset, ssa.SanityCheckFunctions)
-	ssaPkg := program.CreatePackage(pkg, []*ast.File{file}, info, false)
+	ssaPkg := program.CreatePackage(pkg, files, info, false)
 	ssaPkg.Build()
 	return ssaPkg, nil
 }

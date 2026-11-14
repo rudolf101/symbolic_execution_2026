@@ -31,6 +31,31 @@ type Interpreter struct {
 	PanicMessage  string
 	pathFormula   []z3.Bool
 	model         *z3.Model // модель условия пути, позволяет не вызывать решатель для ветвей, которым она удовлетворяет
+	trace         *blockTrace
+}
+
+// blockTrace - пройденные путём блоки в обратном порядке; хвост списка общий у состояний с общим префиксом пути
+type blockTrace struct {
+	block    *ssa.BasicBlock
+	previous *blockTrace
+}
+
+// Edge - переход между блоками; у входа в функцию From == nil
+type Edge struct {
+	From, To *ssa.BasicBlock
+}
+
+// VisitedEdges возвращает множество переходов между блоками, пройденных путём
+func (interpreter *Interpreter) VisitedEdges() map[Edge]bool {
+	visited := make(map[Edge]bool)
+	for trace := interpreter.trace; trace != nil; trace = trace.previous {
+		var from *ssa.BasicBlock
+		if trace.previous != nil {
+			from = trace.previous.block
+		}
+		visited[Edge{From: from, To: trace.block}] = true
+	}
+	return visited
 }
 
 type CallStackFrame struct {
@@ -58,6 +83,7 @@ func newInterpreter(analyser *Analyser, function *ssa.Function) Interpreter {
 		CallStack:     []CallStackFrame{frame},
 		Analyser:      analyser,
 		PathCondition: symbolic.NewBoolConstant(true),
+		trace:         &blockTrace{block: frame.Block},
 	}
 }
 
@@ -176,6 +202,7 @@ func (interpreter *Interpreter) enterBlock(target *ssa.BasicBlock) {
 	}
 	frame.Block = target
 	frame.InstrIndex = index
+	interpreter.trace = &blockTrace{block: target, previous: interpreter.trace}
 	interpreter.Analyser.BlockVisits[target]++
 }
 
