@@ -107,6 +107,14 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 	t := expr.Left.Type()
 
 	switch {
+	case t == symbolic.RefType:
+		l, r := left.(z3.BV), right.(z3.BV)
+		switch expr.Operator {
+		case symbolic.EQ:
+			return l.Eq(r)
+		case symbolic.NE:
+			return l.NE(r)
+		}
 	case t == symbolic.BoolType:
 		l, r := left.(z3.Bool), right.(z3.Bool)
 		switch expr.Operator {
@@ -303,7 +311,53 @@ func (zt *Z3Translator) VisitConversion(expr *symbolic.Conversion) interface{} {
 	panic(NewTranslationError(fmt.Sprintf("unsupported conversion from %s to %s", from, to), expr))
 }
 
+// VisitRef транслирует ссылку в её адрес
+func (zt *Z3Translator) VisitRef(expr *symbolic.Ref) interface{} {
+	return expr.Address.Accept(zt)
+}
+
+// VisitArrayVariable транслирует символьный массив в Z3 массив
+func (zt *Z3Translator) VisitArrayVariable(expr *symbolic.ArrayVariable) interface{} {
+	sort := zt.arraySort(expr.ArraySort, expr)
+	if v, ok := zt.vars[expr.Name]; ok {
+		if !v.Sort().AsAST().Equal(sort.AsAST()) {
+			panic(NewTranslationError(fmt.Sprintf("variable %s is used with different types", expr.Name), expr))
+		}
+		return v
+	}
+	v := zt.ctx.Const(expr.Name, sort)
+	zt.vars[expr.Name] = v
+	return v
+}
+
+// VisitConstArray транслирует константный массив
+func (zt *Z3Translator) VisitConstArray(expr *symbolic.ConstArray) interface{} {
+	return zt.ctx.ConstArray(zt.sort(expr.ArraySort.Index, expr), expr.Value.Accept(zt).(z3.Value))
+}
+
+// VisitArrayStore транслирует запись в массив
+func (zt *Z3Translator) VisitArrayStore(expr *symbolic.ArrayStore) interface{} {
+	array := expr.Array.Accept(zt).(z3.Array)
+	return array.Store(expr.Index.Accept(zt).(z3.Value), expr.Value.Accept(zt).(z3.Value))
+}
+
+// VisitArraySelect транслирует чтение из массива
+func (zt *Z3Translator) VisitArraySelect(expr *symbolic.ArraySelect) interface{} {
+	array := expr.Array.Accept(zt).(z3.Array)
+	return array.Select(expr.Index.Accept(zt).(z3.Value))
+}
+
 // Вспомогательные методы
+
+func (zt *Z3Translator) arraySort(sort *symbolic.ArraySort, expr symbolic.SymbolicExpression) z3.Sort {
+	var element z3.Sort
+	if sort.Element == symbolic.ArrayType {
+		element = zt.arraySort(sort.Inner, expr)
+	} else {
+		element = zt.sort(sort.Element, expr)
+	}
+	return zt.ctx.ArraySort(zt.sort(sort.Index, expr), element)
+}
 
 func (zt *Z3Translator) sort(t symbolic.ExpressionType, expr symbolic.SymbolicExpression) z3.Sort {
 	switch {
@@ -315,6 +369,8 @@ func (zt *Z3Translator) sort(t symbolic.ExpressionType, expr symbolic.SymbolicEx
 		return zt.ctx.FloatSort(11, 53)
 	case t.IsInteger():
 		return zt.ctx.BVSort(t.BitWidth())
+	case t == symbolic.RefType:
+		return zt.ctx.BVSort(symbolic.AddressType.BitWidth())
 	}
 	panic(NewTranslationError(fmt.Sprintf("unsupported type %s", t), expr))
 }
@@ -330,8 +386,10 @@ func (zt *Z3Translator) castToZ3Type(value interface{}, targetType symbolic.Expr
 	switch {
 	case targetType == symbolic.BoolType:
 		_, ok = value.(z3.Bool)
-	case targetType.IsInteger():
+	case targetType.IsInteger() || targetType == symbolic.RefType:
 		_, ok = value.(z3.BV)
+	case targetType == symbolic.ArrayType:
+		_, ok = value.(z3.Array)
 	case targetType.IsFloat():
 		_, ok = value.(z3.Float)
 	}

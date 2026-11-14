@@ -10,4 +10,9 @@ type Visitor interface {
 	VisitFloatConstant(expr *FloatConstant) interface{}
 	VisitUnaryOperation(expr *UnaryOperation) interface{}
 	VisitConversion(expr *Conversion) interface{}
+	VisitRef(expr *Ref) interface{}
+	VisitArrayVariable(expr *ArrayVariable) interface{}
+	VisitConstArray(expr *ConstArray) interface{}
+	VisitArrayStore(expr *ArrayStore) interface{}
+	VisitArraySelect(expr *ArraySelect) interface{}
 }
