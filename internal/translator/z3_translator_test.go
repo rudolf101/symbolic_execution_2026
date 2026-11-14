@@ -106,3 +106,31 @@ func TestTranslationErrors(t *testing.T) {
 		t.Error("expected error for unsupported type")
 	}
 }
+
+func TestArraysAndRefs(t *testing.T) {
+	addr := func(name string) *s.SymbolicVariable { return s.NewSymbolicVariable(name, s.AddressType) }
+	inner := &s.ArraySort{Index: s.IntType, Element: s.IntType}
+	outer := &s.ArraySort{Index: s.AddressType, Element: s.ArrayType, Inner: inner}
+	heap := s.NewArrayVariable("heap", outer)
+	a, b := addr("a"), addr("b")
+	index := s.NewSymbolicVariable("index", s.IntType)
+
+	contents := s.NewArrayStore(s.NewConstArray(inner, i(0)), index, i(5))
+	updated := s.NewArrayStore(heap, a, contents)
+	readB := s.NewArraySelect(s.NewArraySelect(updated, b), i(3))
+
+	assertValid(t, s.NewLogicalOperation([]s.SymbolicExpression{
+		s.NewLogicalOperation([]s.SymbolicExpression{eq(a, b), eq(index, i(3))}, s.AND),
+		eq(readB, i(5)),
+	}, s.IMPLIES))
+	assertValid(t, s.NewLogicalOperation([]s.SymbolicExpression{
+		s.NewLogicalOperation([]s.SymbolicExpression{eq(a, b), bin(index, i(3), s.NE)}, s.AND),
+		eq(readB, i(0)),
+	}, s.IMPLIES))
+	assertSat(t, s.NewLogicalOperation([]s.SymbolicExpression{bin(a, b, s.NE), eq(readB, i(42))}, s.AND), true)
+
+	person := s.StructInfo("Person", s.ScalarInfo(s.IntType))
+	p, q := s.NewRef(a, person), s.NewRef(b, person)
+	assertSat(t, eq(p, q), true)
+	assertValid(t, bin(s.NilRef(person), s.NewRef(s.NewTypedIntConstant(1, s.AddressType), person), s.NE))
+}

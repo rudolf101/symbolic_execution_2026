@@ -175,7 +175,7 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 			mismatch()
 		}
 	case op == EQ || op == NE:
-		if lt != rt || !(lt.IsNumeric() || lt == BoolType) {
+		if lt != rt || !(lt.IsNumeric() || lt == BoolType || lt == RefType) {
 			mismatch()
 		}
 	case op.IsComparison():
@@ -371,20 +371,155 @@ func (op LogicalOperator) String() string {
 	}
 }
 
+// Ref - символьная ссылка: адрес объекта (выражение типа AddressType) и тип объекта.
+// Нулевой адрес соответствует nil.
 type Ref struct {
-	// TODO: Выбрать и написать внутреннее представление символьной ссылки
+	Address SymbolicExpression
+	Target  *TypeInfo
+}
+
+// NewRef создаёт ссылку на объект типа target по адресу address
+func NewRef(address SymbolicExpression, target *TypeInfo) *Ref {
+	if address.Type() != AddressType {
+		panic(fmt.Sprintf("address %s has type %s", address, address.Type()))
+	}
+	return &Ref{Address: address, Target: target}
+}
+
+// NilRef создаёт нулевую ссылку
+func NilRef(target *TypeInfo) *Ref {
+	return NewRef(NewTypedIntConstant(0, AddressType), target)
 }
 
 func (ref *Ref) Type() ExpressionType {
-	panic("не реализовано")
+	return RefType
 }
 
 func (ref *Ref) String() string {
-	panic("не реализовано")
+	if c, ok := ref.Address.(*IntConstant); ok && c.Value == 0 {
+		return "nil"
+	}
+	return fmt.Sprintf("&%s@%s", ref.Target.Key(), ref.Address)
 }
 
 func (ref *Ref) Accept(visitor Visitor) interface{} {
-	panic("не реализовано")
+	return visitor.VisitRef(ref)
+}
+
+// ArrayExpression - выражение-массив, отображающее индексы в элементы
+type ArrayExpression interface {
+	SymbolicExpression
+	Sort() *ArraySort
+}
+
+// ArrayVariable - символьный массив с произвольным содержимым
+type ArrayVariable struct {
+	Name      string
+	ArraySort *ArraySort
+}
+
+// NewArrayVariable создаёт новый символьный массив
+func NewArrayVariable(name string, sort *ArraySort) *ArrayVariable {
+	return &ArrayVariable{Name: name, ArraySort: sort}
+}
+
+func (av *ArrayVariable) Type() ExpressionType { return ArrayType }
+
+func (av *ArrayVariable) Sort() *ArraySort { return av.ArraySort }
+
+func (av *ArrayVariable) String() string { return av.Name }
+
+func (av *ArrayVariable) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArrayVariable(av)
+}
+
+// ConstArray - массив, все элементы которого равны Value
+type ConstArray struct {
+	ArraySort *ArraySort
+	Value     SymbolicExpression
+}
+
+// NewConstArray создаёт константный массив
+func NewConstArray(sort *ArraySort, value SymbolicExpression) *ConstArray {
+	requireElement(sort, value)
+	return &ConstArray{ArraySort: sort, Value: value}
+}
+
+func (ca *ConstArray) Type() ExpressionType { return ArrayType }
+
+func (ca *ConstArray) Sort() *ArraySort { return ca.ArraySort }
+
+func (ca *ConstArray) String() string { return fmt.Sprintf("[%s]", ca.Value) }
+
+func (ca *ConstArray) Accept(visitor Visitor) interface{} {
+	return visitor.VisitConstArray(ca)
+}
+
+// ArrayStore - массив Array, в котором по индексу Index записано Value
+type ArrayStore struct {
+	Array ArrayExpression
+	Index SymbolicExpression
+	Value SymbolicExpression
+}
+
+// NewArrayStore создаёт запись в массив
+func NewArrayStore(array ArrayExpression, index, value SymbolicExpression) *ArrayStore {
+	requireIndex(array.Sort(), index)
+	requireElement(array.Sort(), value)
+	return &ArrayStore{Array: array, Index: index, Value: value}
+}
+
+func (as *ArrayStore) Type() ExpressionType { return ArrayType }
+
+func (as *ArrayStore) Sort() *ArraySort { return as.Array.Sort() }
+
+func (as *ArrayStore) String() string {
+	return fmt.Sprintf("%s{%s <- %s}", as.Array, as.Index, as.Value)
+}
+
+func (as *ArrayStore) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArrayStore(as)
+}
+
+// ArraySelect - чтение элемента массива; если элемент сам массив, выражение является ArrayExpression
+type ArraySelect struct {
+	Array ArrayExpression
+	Index SymbolicExpression
+}
+
+// NewArraySelect создаёт чтение из массива
+func NewArraySelect(array ArrayExpression, index SymbolicExpression) *ArraySelect {
+	requireIndex(array.Sort(), index)
+	return &ArraySelect{Array: array, Index: index}
+}
+
+func (as *ArraySelect) Type() ExpressionType { return as.Array.Sort().Element }
+
+func (as *ArraySelect) Sort() *ArraySort { return as.Array.Sort().Inner }
+
+func (as *ArraySelect) String() string {
+	return fmt.Sprintf("%s[%s]", as.Array, as.Index)
+}
+
+func (as *ArraySelect) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArraySelect(as)
+}
+
+func requireIndex(sort *ArraySort, index SymbolicExpression) {
+	if index.Type() != sort.Index {
+		panic(fmt.Sprintf("index %s has type %s, array %s", index, index.Type(), sort))
+	}
+}
+
+func requireElement(sort *ArraySort, value SymbolicExpression) {
+	if sort.Element == ArrayType {
+		if array, ok := value.(ArrayExpression); ok && array.Sort().Equal(sort.Inner) {
+			return
+		}
+	} else if value.Type() == sort.Element {
+		return
+	}
+	panic(fmt.Sprintf("value %s does not match array %s", value, sort))
 }
 
 // UnaryOperator - арифметические унарные операторы (логическое отрицание - LogicalOperation с NOT)

@@ -50,3 +50,47 @@ func TestTypeChecks(t *testing.T) {
 	mustPanic("! with two operands", func() { NewLogicalOperation([]SymbolicExpression{b, b}, NOT) })
 	mustPanic("^float", func() { NewUnaryOperation(f, BIT_NOT) })
 }
+
+func TestRefsAndArrays(t *testing.T) {
+	person := StructInfo("Person", ScalarInfo(IntType))
+	p := NewRef(NewSymbolicVariable("p", AddressType), person)
+	sort := &ArraySort{Index: AddressType, Element: IntType}
+	heap := NewArrayVariable("heap", sort)
+	store := NewArrayStore(heap, p.Address, NewIntConstant(1))
+	read := NewArraySelect(store, p.Address)
+	nested := &ArraySort{Index: AddressType, Element: ArrayType, Inner: &ArraySort{Index: IntType, Element: BoolType}}
+
+	cases := []struct {
+		expr SymbolicExpression
+		str  string
+		tpe  ExpressionType
+	}{
+		{p, "&Person@p", RefType},
+		{NilRef(person), "nil", RefType},
+		{NewBinaryOperation(p, NilRef(person), EQ), "(&Person@p == nil)", BoolType},
+		{read, "heap{p <- 1}[p]", IntType},
+		{NewArraySelect(NewArrayVariable("arrays", nested), p.Address), "arrays[p]", ArrayType},
+	}
+	for _, c := range cases {
+		if c.expr.String() != c.str || c.expr.Type() != c.tpe {
+			t.Errorf("got %s: %s, want %s: %s", c.expr, c.expr.Type(), c.str, c.tpe)
+		}
+	}
+	if ArrayInfo(PointerInfo(person), -1).Key() != "[]*Person" || ArrayInfo(person, 3).Key() != "[3]Person" {
+		t.Error("unexpected type keys")
+	}
+
+	mustPanic := func(name string, build func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Errorf("%s: expected panic", name)
+			}
+		}()
+		build()
+	}
+	mustPanic("int address", func() { NewRef(NewIntConstant(1), person) })
+	mustPanic("wrong index", func() { NewArraySelect(heap, NewIntConstant(0)) })
+	mustPanic("wrong element", func() { NewArrayStore(heap, p.Address, NewBoolConstant(true)) })
+	mustPanic("ref < ref", func() { NewBinaryOperation(p, p, LT) })
+}
