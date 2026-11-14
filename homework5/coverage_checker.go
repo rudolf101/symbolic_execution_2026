@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"symbolic-execution-course/internal"
 )
@@ -41,7 +42,13 @@ func runTestsWithCoverage(testFilePath string) (string, error) {
 	coverageFile := filepath.Join(os.TempDir(), "coverage.out")
 	defer os.Remove(coverageFile)
 
-	cmd := exec.Command("go", "test", "-v", "-coverprofile="+coverageFile, testDir)
+	// Запускаются только сгенерированные тесты, чтобы другие тесты каталога не влияли на покрытие
+	runPattern, err := generatedTestsPattern(testFilePath)
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("go", "test", "-v", "-count=1", "-run", runPattern, "-coverprofile="+coverageFile, testDir)
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -59,6 +66,18 @@ func runTestsWithCoverage(testFilePath string) (string, error) {
 	}
 
 	return coverage, nil
+}
+
+func generatedTestsPattern(testFilePath string) (string, error) {
+	code, err := os.ReadFile(testFilePath)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, match := range regexp.MustCompile(`(?m)^func (Test\w*)\(`).FindAllStringSubmatch(string(code), -1) {
+		names = append(names, match[1])
+	}
+	return "^(" + strings.Join(names, "|") + ")$", nil
 }
 
 func analyzeCoverage(coverageFile string) (string, error) {

@@ -3,6 +3,7 @@ package internal
 import (
 	"container/heap"
 	"fmt"
+	"time"
 
 	"github.com/ebukreev/go-z3/z3"
 	"golang.org/x/tools/go/ssa"
@@ -15,10 +16,12 @@ import (
 // анализ завершается, когда очередь состояний пуста или исчерпан глобальный бюджет инструкций MaxSteps.
 // Кроме того, путь отбрасывается, если он больше MaxBranchVisits раз символьно ветвится в одном блоке
 // (ограничение развёртки циклов с символьным условием; циклы с конкретным условием не ограничиваются).
+// Если задан Timeout, анализ также прекращается по истечении этого времени.
 type Options struct {
 	PathSelector    PathSelector
 	MaxSteps        int
 	MaxBranchVisits int
+	Timeout         time.Duration
 }
 
 func DefaultOptions() Options {
@@ -54,8 +57,13 @@ func AnalyseWith(source string, functionName string, options Options) *Analyser 
 	if err != nil {
 		panic(err)
 	}
+	return AnalyseFunction(function, options)
+}
+
+// AnalyseFunction анализирует уже построенную SSA функцию
+func AnalyseFunction(function *ssa.Function, options Options) *Analyser {
 	if len(function.Blocks) == 0 {
-		panic(fmt.Sprintf("function %s has no body", functionName))
+		panic(fmt.Sprintf("function %s has no body", function.Name()))
 	}
 
 	z3Translator := translator.NewZ3Translator()
@@ -74,7 +82,14 @@ func AnalyseWith(source string, functionName string, options Options) *Analyser 
 }
 
 func (analyser *Analyser) run() {
+	var deadline time.Time
+	if analyser.Options.Timeout > 0 {
+		deadline = time.Now().Add(analyser.Options.Timeout)
+	}
 	for analyser.StatesQueue.Len() > 0 && analyser.Steps < analyser.Options.MaxSteps {
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			break
+		}
 		state := heap.Pop(&analyser.StatesQueue).(*Item).value
 		analyser.Steps++
 		for _, next := range state.interpretDynamically(state.currentInstruction()) {

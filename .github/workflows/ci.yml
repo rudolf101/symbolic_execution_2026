@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y libz3-dev
+
+      - name: Build and lint
+        run: make build lint
+
+      - name: Test
+        run: go test ./...
+
+      - name: Coverage of generated tests (homework3 examples)
+        run: go run ./homework5 homework3/examples/test_functions.go
